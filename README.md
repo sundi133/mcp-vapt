@@ -1,5 +1,7 @@
 # ExternalAttacker MCP Server
 
+![ExternalAttacker-MCP](/images/ExternalAttacker-MCP-Banner.png)
+
 ## Model Context Protocol (MCP) Server for External Attack Surface Management
 
 ExternalAttacker is a powerful integration that brings automated scanning capabilities with natural language interface for comprehensive external attack surface management and reconnaissance.
