@@ -77,7 +77,7 @@ Join our Telegram channel for updates, tips, and discussion:
         "ExternalAttacker-MCP": {
             "command": "python",
             "args": [
-                "<Your_Path>\\ExternalAttacker-MCP.py"
+                "/Users/jyotirmoysundi/git/ExternalAttacker-MCP/ExternalAttacker-MCP.py"
             ]
         }
     }

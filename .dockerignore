@@ -1,0 +1,73 @@
+# Git
+.git
+.gitignore
+README.md
+INSTALLATION.md
+RED_TEAM_EXAMPLES.md
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.env
+.venv
+venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local development
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Tool directories (will be installed in container)
+~/tools/
+~/go/bin/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+tmp/
+
+# Logs
+logs/
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 
