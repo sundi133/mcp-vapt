@@ -2,16 +2,81 @@ from fastmcp import FastMCP
 import subprocess
 import requests
 import os
-mcp = FastMCP("docs")
+
+# Import license manager
+import sys
+
+# Detect if running in MCP mode (suppress startup messages to avoid JSON parsing errors)
+# When PORT is not set, we're running locally as MCP server using STDIO
+# When PORT is set, we're running in cloud mode and can show messages
+is_mcp_stdio_mode = os.environ.get('PORT') is None
+
+try:
+    from license_manager import LicenseManager
+    license_manager = LicenseManager()
+    
+    # Check license at startup (only show messages when not in STDIO mode)
+    if not is_mcp_stdio_mode:
+        print("🔐 Checking ExternalAttacker-MCP License...", file=sys.stderr)
+    
+    license_status = license_manager.validate_license()
+    
+    if license_status['valid']:
+        license_info = license_manager.get_license_info()
+        if not is_mcp_stdio_mode:
+            print(f"✅ License Valid - {license_info['license_type']} ({license_info['days_remaining']} days remaining)", file=sys.stderr)
+            print(f"Licensed to: {license_info['customer_name']} ({license_info['customer_email']})", file=sys.stderr)
+            
+            # Warning for expiring licenses
+            if license_info['days_remaining'] <= 7:
+                print(f"⚠️ License expires in {license_info['days_remaining']} days!", file=sys.stderr)
+    else:
+        if not is_mcp_stdio_mode:
+            print(f"❌ License Error: {license_status['error']}", file=sys.stderr)
+            print("🔧 Activate trial license: python3 license_manager.py activate", file=sys.stderr)
+            if license_status.get('action') != 'activate_trial':
+                print("📞 Contact support for license renewal", file=sys.stderr)
+            
+            # Allow startup but functions will be limited
+            print("⚠️ Starting in limited mode...", file=sys.stderr)
+        license_manager = None
+        
+except ImportError:
+    if not is_mcp_stdio_mode:
+        print("⚠️ License manager not available - running without license validation", file=sys.stderr)
+    license_manager = None
+
+mcp = FastMCP("ExternalAttacker-MCP")
 
 def run_command(command: list):
     """Run command via the Flask app's /api/run endpoint"""
     try:
+        # Check license before running commands
+        if license_manager:
+            validation = license_manager.validate_license()
+            if not validation['valid']:
+                return {
+                    'stdout': '',
+                    'stderr': f'License Error: {validation["error"]}',
+                    'returncode': 1
+                }
+            
+            # Check feature access for compliance modules
+            if 'compliance' in str(command) and not license_manager.check_feature_access('compliance_modules'):
+                return {
+                    'stdout': '',
+                    'stderr': 'Compliance modules require a valid license',
+                    'returncode': 1
+                }
+        
         tool = command[0]
         args = " ".join(command[1:])
         
+        # Use environment variable for Flask app URL - defaults to localhost for local testing
+        flask_url = os.environ.get('FLASK_APP_URL', 'http://127.0.0.1:6991')
+        
         response = requests.post(
-            "http://localhost:6991/api/run",
+            f"{flask_url}/api/run",
             json={"tool": tool, "args": args},
             timeout=300
         )
@@ -59,6 +124,11 @@ async def scan_subdomains(target: str, domain_file: bool, threads: int = 4):
         domain_file: Whether target is a file containing domains
         threads: Number of concurrent threads to use
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "subfinder",
         "-list" if domain_file else "-domain", target,
@@ -80,6 +150,11 @@ async def scan_subdomains_fast(target: str, threads: int = 4, sources: str = "cr
         threads: Number of concurrent threads to use (default: 50)
         sources: Comma-separated list of sources to use (default: crtsh,bufferover,rapiddns)
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "subfinder",
         "-domain", target,
@@ -105,6 +180,11 @@ async def scan_ports(target: str, file: bool, ports: str = "80,443", top_ports: 
         top_ports: Whether to scan top N ports or use port range
         threads: Number of concurrent threads (default: 20)
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "naabu",
         "-silent",
@@ -138,6 +218,11 @@ async def analyze_http_services(target: str, file: bool, threads: int = 4):
         file: Whether target is a file containing domains
         threads: Number of concurrent threads to use
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "httpx",
         "-silent",
@@ -167,6 +252,11 @@ async def detect_cdn(target: str, resolver: str = "8.8.8.8"):
         target: Domain to check for CDN usage
         resolver: DNS resolver to use
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "cdncheck",
         "-input", str(target),
@@ -192,6 +282,11 @@ async def analyze_tls_config(target: str, file: bool, port: int = 443, resolver:
         resolver: DNS resolver to use
         threads: Number of concurrent threads to use
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "tlsx",
         "-silent",
@@ -243,6 +338,11 @@ async def enumerate_assets(mode: str, target: str = None, wordlist: str = None, 
     if not wordlist:
         raise ValueError("wordlist is required")
         
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = ["gobuster", mode, "-t", str(threads), "-q"]
     
     # Add mode-specific arguments
@@ -320,6 +420,11 @@ async def fuzz_endpoints(target: str, threads: int = 4,
     else:
         if not os.path.exists(wordlist):
             raise FileNotFoundError(f"File {wordlist} not found")
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "ffuf",
         "-s",
@@ -366,6 +471,11 @@ async def resolve_dns(target: str, file: bool, threads: int = 4, resolver: str =
         if not os.path.exists(wordlist):
             raise FileNotFoundError(f"File {wordlist} not found")
     
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "dnsx",
         "-silent",
@@ -399,6 +509,11 @@ async def crawl_website(target: str, depth: int = 3, field_scope: str = "rdn",
         include_subs: Include subdomains in crawling
         output_mode: Output format (json/plain)
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "katana",
         "-u", target,
@@ -440,6 +555,11 @@ async def scan_vulnerabilities(target: str, file: bool, templates: str = None,
         exclude_tags: Tags to exclude from scan
         include_tags: Tags to include in scan
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "nuclei",
         "-silent",
@@ -490,6 +610,11 @@ async def test_sql_injection(target: str, data: str = None, method: str = "GET",
         tamper: Tamper script to use
         technique: SQL injection technique (B,E,U,S,T,Q)
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "sqlmap",
         "-u", target,
@@ -539,6 +664,11 @@ async def scan_xss(target: str, file: bool, payloads: str = None,
         mining_dict: Enable dictionary mining  
         skip_bav: Skip Basic Another Vulnerability analysis
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "dalfox",
         "url" if not file else "file",
@@ -605,6 +735,11 @@ async def enumerate_apis(target: str, wordlist: str = None, threads: int = 4,
         if not os.path.exists(wordlist):
             raise FileNotFoundError(f"File {wordlist} not found")
             
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "kiterunner", "scan",
         target,
@@ -650,6 +785,11 @@ async def scan_with_zap(target: str, spider: bool = True, ajax_spider: bool = Fa
         exclude_urls: URLs to exclude from scan
         include_urls: URLs to include in scan
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "zap-baseline.py" if not active_scan else "zap-full-scan.py",
         "-t", target,
@@ -695,6 +835,11 @@ async def scan_secrets(target: str, scan_type: str = "filesystem",
         output_format: Output format (json/compact)
         rules: Custom rules file path
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = ["trufflehog"]
     
     if scan_type == "filesystem":
@@ -988,6 +1133,11 @@ async def test_command_injection(target: str, cookie: str = None, headers: str =
         timeout: Request timeout
         tamper: Tamper script for evasion
     """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
     command = [
         "commix",
         "--url", target,
@@ -1292,6 +1442,962 @@ async def diagnose_subfinder(target: str):
         'stderr': '',
         'returncode': 0
     }
+
+@mcp.tool()
+async def scan_with_w3af(target: str, profile: str = "OWASP_TOP10", threads: int = 4):
+    """
+    Web application security scanning using W3af framework
+    
+    Args:
+        target: Target URL to scan
+        profile: W3af profile to use (OWASP_TOP10/full_audit/bruteforce/etc)
+        threads: Number of concurrent threads
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "w3af_console",
+        "-s", f"/tmp/w3af_script_{profile}.w3af"
+    ]
+    
+    # Create W3af script
+    script_content = f"""
+plugins
+output console,textFile
+output config textFile
+set fileName /tmp/w3af_output.txt
+set verbose True
+back
+output config console
+set verbose True
+back
+
+audit {profile}
+grep all
+crawl webSpider
+crawl config webSpider
+set onlyForward True
+back
+
+target
+set target {target}
+back
+
+start
+exit
+"""
+    
+    import tempfile
+    script_path = f"/tmp/w3af_script_{profile}.w3af"
+    with open(script_path, "w") as f:
+        f.write(script_content)
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_burp(target: str, project_file: str = "/tmp/burp_project", 
+                        scan_type: str = "crawl_and_audit"):
+    """
+    Web application security scanning using Burp Suite Professional
+    
+    Args:
+        target: Target URL to scan
+        project_file: Burp project file path
+        scan_type: Type of scan (crawl_and_audit/crawl_only/audit_only)
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "java", "-jar", "/opt/burpsuite_pro/burpsuite_pro.jar",
+        "--project-file", project_file,
+        "--config-file", "/tmp/burp_config.json"
+    ]
+    
+    # Create Burp config
+    config = {
+        "target": {
+            "scope": {
+                "include": [{"rule": target}]
+            }
+        },
+        "spider": {
+            "mode": "modern"
+        },
+        "scanner": {
+            "audit_items": "all"
+        }
+    }
+    
+    import json
+    with open("/tmp/burp_config.json", "w") as f:
+        json.dump(config, f)
+    
+    return run_command(command)
+
+@mcp.tool()
+async def exploit_with_metasploit(target: str, payload: str = "generic/shell_reverse_tcp",
+                                 lhost: str = "127.0.0.1", lport: int = 4444):
+    """
+    Exploitation using Metasploit framework
+    
+    Args:
+        target: Target IP/hostname
+        payload: Metasploit payload to use
+        lhost: Local host for reverse connection
+        lport: Local port for reverse connection
+    """
+    commands = [
+        f"use exploit/multi/handler",
+        f"set payload {payload}",
+        f"set LHOST {lhost}",
+        f"set LPORT {lport}",
+        f"set RHOSTS {target}",
+        "exploit"
+    ]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "msfconsole", "-q", "-x",
+        "; ".join(commands)
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def bruteforce_with_hydra(target: str, service: str = "ssh", 
+                               username: str = None, wordlist: str = None,
+                               threads: int = 4, port: int = None):
+    """
+    Password bruteforce attacks using Hydra
+    
+    Args:
+        target: Target IP/hostname
+        service: Service to attack (ssh/ftp/http/etc)
+        username: Username to attack (or username list file)
+        wordlist: Password wordlist file
+        threads: Number of parallel connections
+        port: Target port (optional)
+    """
+    if not wordlist:
+        wordlist = "/usr/share/wordlists/rockyou.txt"
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "hydra",
+        "-t", str(threads),
+        "-V"
+    ]
+    
+    if username:
+        if "@" in username:  # Email list format
+            command.extend(["-L", username])
+        else:
+            command.extend(["-l", username])
+    
+    if wordlist:
+        command.extend(["-P", wordlist])
+    
+    if port:
+        command.extend(["-s", str(port)])
+    
+    command.extend([target, service])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def crack_passwords_john(hash_file: str, wordlist: str = None, 
+                              format_type: str = None, threads: int = 4):
+    """
+    Password cracking using John the Ripper
+    
+    Args:
+        hash_file: File containing password hashes
+        wordlist: Wordlist file for dictionary attack
+        format_type: Hash format (md5/sha1/sha256/etc)
+        threads: Number of threads to use
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "john",
+        "--fork=" + str(threads)
+    ]
+    
+    if wordlist:
+        command.extend(["--wordlist=" + wordlist])
+    
+    if format_type:
+        command.extend(["--format=" + format_type])
+    
+    command.append(hash_file)
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_skipfish(target: str, output_dir: str = "/tmp/skipfish_output",
+                           threads: int = 4, depth: int = 5):
+    """
+    Web application security scanning using Skipfish
+    
+    Args:
+        target: Target URL to scan
+        output_dir: Output directory for results
+        threads: Number of concurrent connections
+        depth: Maximum crawling depth
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "skipfish",
+        "-o", output_dir,
+        "-m", str(depth),
+        "-W", "/usr/share/skipfish/dictionaries/minimal.wl",
+        "-t", str(threads),
+        target
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_ratproxy(target: str, port: int = 8080, 
+                           output_file: str = "/tmp/ratproxy.log"):
+    """
+    Web application security audit using Ratproxy
+    
+    Args:
+        target: Target URL to proxy
+        port: Proxy port to listen on
+        output_file: Output log file
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "ratproxy",
+        "-w", output_file,
+        "-v", target,
+        "-p", str(port),
+        "-lextifscxmjr"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def fuzz_with_wfuzz(target: str, wordlist: str = None, threads: int = 4,
+                         hide_codes: str = "404", fuzz_param: str = "FUZZ"):
+    """
+    Web application fuzzing using Wfuzz
+    
+    Args:
+        target: Target URL with FUZZ keyword
+        wordlist: Wordlist file for fuzzing
+        threads: Number of concurrent connections
+        hide_codes: HTTP status codes to hide
+        fuzz_param: Fuzzing parameter name
+    """
+    if not wordlist:
+        wordlist = "/usr/share/wordlists/dirb/common.txt"
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "wfuzz",
+        "-c",
+        "-z", f"file,{wordlist}",
+        "--hc", hide_codes,
+        "-t", str(threads),
+        target.replace("FUZZ", fuzz_param)
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_watcher(target: str, output_file: str = "/tmp/watcher.log"):
+    """
+    Web application security scanning using Watcher
+    
+    Args:
+        target: Target URL to scan
+        output_file: Output file for results
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "watcher",
+        "-u", target,
+        "-o", output_file,
+        "--spider"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_nikto(target: str, port: int = 80, ssl: bool = False,
+                         output_file: str = "/tmp/nikto.txt"):
+    """
+    Web server security scanning using Nikto
+    
+    Args:
+        target: Target hostname/IP
+        port: Target port
+        ssl: Use SSL/HTTPS
+        output_file: Output file for results
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "nikto",
+        "-h", target,
+        "-p", str(port),
+        "-o", output_file,
+        "-Format", "txt"
+    ]
+    
+    if ssl:
+        command.append("-ssl")
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_with_nmap(target: str, scan_type: str = "sS", ports: str = "1-65535",
+                        threads: int = 4, scripts: str = None, output_file: str = "/tmp/nmap.xml"):
+    """
+    Network scanning using Nmap
+    
+    Args:
+        target: Target IP/hostname/CIDR
+        scan_type: Nmap scan type (sS/sT/sU/sA/etc)
+        ports: Port range to scan
+        threads: Number of parallel scans
+        scripts: NSE scripts to run
+        output_file: Output file for results
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "nmap",
+        f"-{scan_type}",
+        "-p", ports,
+        "-T4",
+        "--max-parallelism", str(threads),
+        "-oX", output_file
+    ]
+    
+    if scripts:
+        command.extend(["--script", scripts])
+    
+    command.append(target)
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_stealth_subdomains(target: str, sources: str = "passive", delay: int = 3):
+    """
+    Stealth subdomain scanning optimized for protected targets
+    
+    Args:
+        target: Domain to scan
+        sources: Source type (passive/active/mixed)
+        delay: Delay between requests in seconds
+    """
+    if sources == "passive":
+        # Only passive sources that don't contact target
+        source_list = "crtsh,bufferover,rapiddns,virustotal,securitytrails"
+    elif sources == "active":
+        source_list = "dnsdumpster,hackertarget"
+    else:
+        source_list = "crtsh,bufferover,rapiddns"
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "subfinder",
+        "-domain", target,
+        "-silent",
+        "-t", "2",  # Low thread count
+        "-timeout", "30",
+        "-sources", source_list,
+        "-rate-limit", "5",  # Very conservative rate limit
+        "-random-agent"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def scan_stealth_ports(target: str, ports: str = "80,443,8080,8443", timing: str = "slow"):
+    """
+    Stealth port scanning to avoid detection
+    
+    Args:
+        target: Target IP or domain
+        ports: Ports to scan
+        timing: Scan timing (slow/normal/fast)
+    """
+    timing_map = {
+        "slow": "-T1",      # Paranoid (very slow)
+        "normal": "-T2",    # Polite  
+        "fast": "-T3"       # Normal
+    }
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "nmap",
+        "-sS",  # SYN scan
+        timing_map.get(timing, "-T2"),
+        "-p", ports,
+        "--max-parallelism", "1",
+        "--scan-delay", "3s",
+        "--max-retries", "1",
+        "-Pn",  # Skip ping
+        "-f",   # Fragment packets
+        "--randomize-hosts",
+        "-oN", "/tmp/stealth_scan.txt",
+        target
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def passive_reconnaissance(target: str, api_sources: bool = False):
+    """
+    Passive reconnaissance without directly contacting target
+    
+    Args:
+        target: Domain to research
+        api_sources: Whether to use API-based sources
+    """
+    import json
+    results = {}
+    
+    # Certificate Transparency
+    ct_cmd = ["curl", "-s", f"https://crt.sh/?q=%25.{target}&output=json"]
+    ct_result = run_command(ct_cmd)
+    results['certificate_transparency'] = ct_result
+    
+    # DNS History (passive)
+    dns_cmd = ["curl", "-s", f"https://securitytrails.com/domain/{target}/dns"]
+    dns_result = run_command(dns_cmd)
+    results['dns_history'] = dns_result
+    
+    return {
+        'stdout': json.dumps(results, indent=2),
+        'stderr': '',
+        'returncode': 0
+    }
+
+@mcp.tool()
+async def nuclei_stealth_scan(target: str, severity: str = "info,low", templates: str = "passive"):
+    """
+    Non-aggressive Nuclei scanning for protected targets
+    
+    Args:
+        target: Target URL
+        severity: Severity levels to scan
+        templates: Template category (passive/safe/all)
+    """
+    template_map = {
+        "passive": "http/misconfiguration/,http/technologies/,ssl/",
+        "safe": "http/misconfiguration/,http/technologies/,ssl/,dns/",
+        "all": ""  # All templates
+    }
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "nuclei",
+        "-u", target,
+        "-silent", "-nc", "-j",
+        "-rate-limit", "3",  # Very slow rate
+        "-timeout", "15",
+        "-retries", "1",
+        "-severity", severity
+    ]
+    
+    if templates != "all":
+        command.extend(["-t", template_map[templates]])
+    
+    return run_command(command)
+
+def check_govready_q_mcp():
+    """Check if GovReady-Q is installed for MCP functions"""
+    import os
+    if not os.path.exists("/opt/govready-q/manage.py"):
+        return {
+            'output': 'GovReady-Q not installed. Install with: pip install govready-q or see https://govready-q.readthedocs.io/',
+            'error': True
+        }
+    return None
+
+@mcp.tool()
+async def start_compliance_assessment(framework: str = "nist_800_53", 
+                                     project_name: str = "Security Assessment",
+                                     organization: str = "Default Org"):
+    """
+    Start a new compliance assessment using GovReady-Q
+    
+    Args:
+        framework: Compliance framework (nist_800_53/fedramp/iso27001/soc2)
+        project_name: Name of the compliance project
+        organization: Organization name for the assessment
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "start_assessment",
+        "--framework", framework,
+        "--project", project_name,
+        "--org", organization,
+        "--output-format", "json"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def run_compliance_scan(target: str, framework: str = "nist_800_53",
+                             scan_type: str = "infrastructure", 
+                             evidence_collection: bool = True):
+    """
+    Run automated compliance scanning against target infrastructure
+    
+    Args:
+        target: Target system/URL to assess for compliance
+        framework: Compliance framework to assess against
+        scan_type: Type of scan (infrastructure/application/network/cloud)
+        evidence_collection: Whether to collect compliance evidence
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "compliance_scan",
+        "--target", target,
+        "--framework", framework,
+        "--scan-type", scan_type,
+        "--collect-evidence" if evidence_collection else "--no-evidence",
+        "--output", "/tmp/compliance_results.json"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def generate_compliance_report(project_id: str = None,
+                                   report_format: str = "oscal", 
+                                   include_evidence: bool = True,
+                                   control_families: str = None):
+    """
+    Generate compliance assessment reports in various formats
+    
+    Args:
+        project_id: GovReady-Q project identifier
+        report_format: Report format (oscal/docx/pdf/json)
+        include_evidence: Include compliance evidence in report
+        control_families: Specific control families to include (AC,AU,SC,etc)
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "export_report"
+    ]
+    
+    if project_id:
+        command.extend(["--project-id", project_id])
+    
+    command.extend([
+        "--format", report_format,
+        "--output", f"/tmp/compliance_report.{report_format}"
+    ])
+    
+    if include_evidence:
+        command.append("--include-evidence")
+    
+    if control_families:
+        command.extend(["--controls", control_families])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def assess_security_controls(target: str, control_baseline: str = "moderate",
+                                 control_set: str = "nist_800_53", 
+                                 assessment_mode: str = "automated"):
+    """
+    Assess security controls implementation against compliance frameworks
+    
+    Args:
+        target: Target system to assess
+        control_baseline: Security control baseline (low/moderate/high)
+        control_set: Control set to assess (nist_800_53/iso27001/cis)
+        assessment_mode: Assessment mode (automated/manual/hybrid)
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "assess_controls",
+        "--target", target,
+        "--baseline", control_baseline,
+        "--control-set", control_set,
+        "--mode", assessment_mode,
+        "--output", "/tmp/control_assessment.json"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def validate_oscal_catalog(catalog_file: str, validate_links: bool = True,
+                               check_completeness: bool = True):
+    """
+    Validate OSCAL (Open Security Controls Assessment Language) catalogs
+    
+    Args:
+        catalog_file: Path to OSCAL catalog JSON/XML file
+        validate_links: Validate all links and references
+        check_completeness: Check catalog completeness
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "validate_oscal",
+        "--catalog", catalog_file
+    ]
+    
+    if validate_links:
+        command.append("--validate-links")
+    
+    if check_completeness:
+        command.append("--check-complete")
+    
+    command.extend(["--output", "/tmp/oscal_validation.json"])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def generate_system_security_plan(system_name: str, system_type: str = "web_application",
+                                      authorization_boundary: str = "system",
+                                      impact_level: str = "moderate"):
+    """
+    Generate System Security Plan (SSP) documentation
+    
+    Args:
+        system_name: Name of the system being documented
+        system_type: Type of system (web_application/database/network/cloud)
+        authorization_boundary: Authorization boundary scope
+        impact_level: FIPS 199 impact level (low/moderate/high)
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "generate_ssp",
+        "--system-name", system_name,
+        "--system-type", system_type,
+        "--boundary", authorization_boundary,
+        "--impact-level", impact_level,
+        "--output", f"/tmp/ssp_{system_name.replace(' ', '_')}.docx"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def compliance_gap_analysis(current_state: str, target_framework: str = "nist_800_53",
+                                target_baseline: str = "moderate", 
+                                output_recommendations: bool = True):
+    """
+    Perform compliance gap analysis between current and target state
+    
+    Args:
+        current_state: Path to current compliance state file (JSON/OSCAL)
+        target_framework: Target compliance framework
+        target_baseline: Target security baseline
+        output_recommendations: Generate remediation recommendations
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "gap_analysis",
+        "--current", current_state,
+        "--target-framework", target_framework,
+        "--target-baseline", target_baseline
+    ]
+    
+    if output_recommendations:
+        command.append("--recommendations")
+    
+    command.extend(["--output", "/tmp/gap_analysis.json"])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def run_internal_compliance_scan(target_network: str, framework: str = "nist_800_53",
+                                     baseline: str = "moderate", include_systems: bool = True,
+                                     include_databases: bool = True, credentialed_scan: bool = False):
+    """
+    High-confidence internal NIST compliance assessment with full scope
+    
+    Args:
+        target_network: Internal network CIDR (e.g., 10.0.0.0/24)
+        framework: Compliance framework (nist_800_53/fedramp/iso27001)
+        baseline: Security baseline (low/moderate/high)
+        include_systems: Include system configuration assessment
+        include_databases: Include database security assessment
+        credentialed_scan: Use system credentials for detailed assessment
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "compliance_scan",
+        "--target", target_network,
+        "--framework", framework,
+        "--baseline", baseline,
+        "--scan-type", "internal",
+        "--collect-evidence",
+        "--confidence-target", "high",
+        "--assessment-scope", "full"
+    ]
+    
+    if include_systems:
+        command.append("--include-systems")
+    
+    if include_databases:
+        command.append("--include-databases")
+    
+    if credentialed_scan:
+        command.append("--credentialed")
+    
+    command.extend(["--output", "/tmp/internal_compliance_results.json"])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def assess_internal_network_controls(target_network: str, control_families: str = "AC,AU,SC,SI",
+                                         assessment_depth: str = "comprehensive"):
+    """
+    Assess specific NIST control families on internal network infrastructure
+    
+    Args:
+        target_network: Internal network CIDR to assess
+        control_families: NIST control families (AC,AU,SC,SI,CM,IA,etc)
+        assessment_depth: Assessment depth (basic/standard/comprehensive)
+    """
+    # Enhanced scanning for specific control families
+    families = control_families.split(',')
+    assessment_commands = []
+    
+    for family in families:
+        family = family.strip().upper()
+        
+        if family == "AC":  # Access Control
+            assessment_commands.extend([
+                f"nmap --script smb-enum-users,smb-enum-shares {target_network}",
+                f"nmap --script ssh-auth-methods,ssh-brute {target_network}",
+                f"nuclei -target {target_network} -t /opt/nuclei-templates/default-logins/ -silent"
+            ])
+        
+        elif family == "AU":  # Audit and Accountability  
+            assessment_commands.extend([
+                f"nmap --script ms-sql-info,mysql-info {target_network}",
+                f"nuclei -target {target_network} -t /opt/nuclei-templates/exposures/ -silent"
+            ])
+        
+        elif family == "SC":  # System and Communications Protection
+            assessment_commands.extend([
+                f"nmap --script ssl-enum-ciphers,ssl-cert {target_network}",
+                f"nuclei -target {target_network} -t /opt/nuclei-templates/ssl/ -silent",
+                f"tlsx -list {target_network} -cipher -tls-version -json"
+            ])
+        
+        elif family == "SI":  # System and Information Integrity
+            assessment_commands.extend([
+                f"nuclei -target {target_network} -t /opt/nuclei-templates/cves/ -severity medium,high,critical -silent",
+                f"nuclei -target {target_network} -t /opt/nuclei-templates/vulnerabilities/ -silent"
+            ])
+    
+    # Execute comprehensive assessment
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "assess_controls",
+        "--target", target_network,
+        "--control-families", control_families,
+        "--assessment-mode", "automated",
+        "--depth", assessment_depth,
+        "--output", f"/tmp/control_assessment_{control_families.replace(',', '_')}.json"
+    ]
+    
+    return run_command(command)
+
+@mcp.tool()
+async def system_configuration_compliance_audit(target_systems: str, os_type: str = "mixed",
+                                               audit_policies: str = "security,access,logging"):
+    """
+    Detailed system configuration compliance audit for NIST controls
+    
+    Args:
+        target_systems: Comma-separated list of system IPs/hostnames
+        os_type: Operating system type (windows/linux/mixed)
+        audit_policies: Security policies to validate
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "system_audit",
+        "--targets", target_systems,
+        "--os-type", os_type,
+        "--policies", audit_policies,
+        "--compliance-framework", "nist_800_53",
+        "--output", "/tmp/system_config_audit.json"
+    ]
+    
+    # Add OS-specific configuration checks
+    if os_type == "windows" or os_type == "mixed":
+        command.extend(["--windows-checks", "gpo,registry,services,users"])
+    
+    if os_type == "linux" or os_type == "mixed":
+        command.extend(["--linux-checks", "configs,permissions,processes,users"])
+    
+    return run_command(command)
+
+@mcp.tool()
+async def generate_high_confidence_compliance_report(assessment_data: str, 
+                                                   framework: str = "nist_800_53",
+                                                   confidence_level: str = "high"):
+    """
+    Generate high-confidence compliance report with internal assessment data
+    
+    Args:
+        assessment_data: Path to assessment data file
+        framework: Compliance framework
+        confidence_level: Confidence level (medium/high/very_high)
+    """
+    # Check if GovReady-Q is available
+    check_result = check_govready_q_mcp()
+    if check_result:
+        return [mcp.TextContent(type="text", text=check_result['output'])]
+    
+    command = [
+        "python3", "/opt/govready-q/manage.py",
+        "generate_compliance_report",
+        "--input", assessment_data,
+        "--framework", framework,
+        "--confidence-level", confidence_level,
+        "--assessment-scope", "internal+external",
+        "--include-evidence",
+        "--include-recommendations",
+        "--format", "oscal",
+        "--output", f"/tmp/high_confidence_nist_report.oscal"
+    ]
+    
+    return run_command(command)
 
 
 if __name__ == "__main__":
