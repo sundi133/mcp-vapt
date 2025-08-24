@@ -1,0 +1,213 @@
+FROM ubuntu:22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV GO_VERSION=1.21.5
+ENV PORT=6991
+
+# Install system dependencies and security tools
+RUN apt-get update && apt-get install -y \
+    # Core system tools
+    python3 \
+    python3-pip \
+    git \
+    curl \
+    wget \
+    unzip \
+    zip \
+    build-essential \
+    ca-certificates \
+    pkg-config \
+    libpcap-dev \
+    libssl-dev \
+    # Network and security tools
+    nmap \
+    nikto \
+    hydra \
+    john \
+    sqlmap \
+    wfuzz \
+    # Additional utilities
+    ruby-full \
+    nodejs \
+    npm \
+    default-jre \
+    default-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+RUN wget -q https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz \
+    && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz \
+    && rm go${GO_VERSION}.linux-amd64.tar.gz
+
+# Set Go environment
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first for better Docker layer caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install Go-based security tools (ProjectDiscovery suite)
+RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest  
+RUN go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+RUN go install -v github.com/projectdiscovery/cdncheck/cmd/cdncheck@latest
+RUN go install -v github.com/projectdiscovery/tlsx/cmd/tlsx@latest
+
+# Install other Go-based tools
+RUN go install -v github.com/ffuf/ffuf/v2@latest
+RUN go install -v github.com/OJ/gobuster/v3@latest
+
+# Install nuclei with fallback
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest || \
+    (echo "Nuclei go install failed, trying binary download..." && \
+     curl -L https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_3.4.7_linux_amd64.zip -o nuclei.zip && \
+     unzip nuclei.zip && mv nuclei /go/bin/ && rm nuclei.zip)
+
+# Install naabu (needs libpcap)
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest || \
+    echo "Naabu installation failed - continuing without it"
+
+# Install dalfox
+RUN go install -v github.com/hahwul/dalfox/v2@latest || \
+    echo "Dalfox installation failed - continuing without it"
+
+# Install kiterunner  
+RUN go install -v github.com/assetnote/kiterunner@latest || \
+    echo "Kiterunner installation failed - continuing without it"
+
+# Install TruffleHog
+RUN curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+
+# Install Commix
+RUN git clone https://github.com/commixproject/commix.git /opt/commix && \
+    chmod +x /opt/commix/commix.py && \
+    ln -sf /opt/commix/commix.py /usr/local/bin/commix
+
+# Install W3AF (optional - may be large)
+RUN git clone --depth 1 https://github.com/andresriancho/w3af.git /opt/w3af && \
+    cd /opt/w3af && \
+    python3 -c "import sys; sys.path.append('.'); from w3af.core.controllers.dependency_check.dependency_check import dependency_check; dependency_check()" || \
+    echo "W3AF dependency check failed - some features may not work" && \
+    ln -sf /opt/w3af/w3af_console /usr/local/bin/w3af_console || \
+    echo "W3AF installation failed - continuing without it"
+
+# Install Skipfish
+RUN git clone https://github.com/spinkham/skipfish /opt/skipfish && \
+    cd /opt/skipfish && make && \
+    ln -sf /opt/skipfish/skipfish /usr/local/bin/skipfish || \
+    echo "Skipfish installation failed - continuing without it"
+
+# Install Ratproxy
+RUN git clone https://github.com/spinkham/ratproxy /opt/ratproxy && \
+    cd /opt/ratproxy && make && \
+    ln -sf /opt/ratproxy/ratproxy /usr/local/bin/ratproxy || \
+    echo "Ratproxy installation failed - continuing without it"
+
+# Install BeEF Framework (optional)
+RUN gem install bundler || true
+RUN git clone --depth 1 https://github.com/beefproject/beef /opt/beef && \
+    cd /opt/beef && bundle install --without test development || \
+    echo "BeEF installation failed - continuing without it"
+
+# Install Metasploit (download installer)
+RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > /tmp/msfinstall && \
+    chmod 755 /tmp/msfinstall && \
+    echo "Metasploit installer ready - run manually if needed"
+
+# Install GovReady-Q Compliance Platform
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 https://github.com/GovReady/govready-q.git /opt/govready-q && \
+    cd /opt/govready-q && \
+    pip3 install --no-cache-dir -r requirements.txt && \
+    mkdir -p /opt/govready-q/local-examples && \
+    python3 manage.py collectstatic --noinput --clear || true && \
+    echo "GovReady-Q compliance platform installed" && \
+    ln -sf /opt/govready-q/manage.py /usr/local/bin/govready-q || \
+    echo "GovReady-Q installation completed with warnings"
+
+# Update Nuclei templates
+RUN which nuclei && nuclei -update-templates -silent || echo "Nuclei templates update skipped"
+
+# Verify all tool installations
+RUN echo "=== Security Tools Installation Summary ===" && \
+    echo "Core Go tools:" && \
+    (which subfinder && echo "✅ subfinder" || echo "❌ subfinder") && \
+    (which httpx && echo "✅ httpx" || echo "❌ httpx") && \
+    (which naabu && echo "✅ naabu" || echo "❌ naabu") && \
+    (which katana && echo "✅ katana" || echo "❌ katana") && \
+    (which dnsx && echo "✅ dnsx" || echo "❌ dnsx") && \
+    (which cdncheck && echo "✅ cdncheck" || echo "❌ cdncheck") && \
+    (which tlsx && echo "✅ tlsx" || echo "❌ tlsx") && \
+    (which nuclei && echo "✅ nuclei" || echo "❌ nuclei") && \
+    (which dalfox && echo "✅ dalfox" || echo "❌ dalfox") && \
+    (which ffuf && echo "✅ ffuf" || echo "❌ ffuf") && \
+    (which gobuster && echo "✅ gobuster" || echo "❌ gobuster") && \
+    (which kiterunner && echo "✅ kiterunner" || echo "❌ kiterunner") && \
+    echo "System tools:" && \
+    (which sqlmap && echo "✅ sqlmap" || echo "❌ sqlmap") && \
+    (which trufflehog && echo "✅ trufflehog" || echo "❌ trufflehog") && \
+    (which commix && echo "✅ commix" || echo "❌ commix") && \
+    (which nmap && echo "✅ nmap" || echo "❌ nmap") && \
+    (which nikto && echo "✅ nikto" || echo "❌ nikto") && \
+    (which hydra && echo "✅ hydra" || echo "❌ hydra") && \
+    (which john && echo "✅ john" || echo "❌ john") && \
+    (which wfuzz && echo "✅ wfuzz" || echo "❌ wfuzz") && \
+    echo "Optional tools:" && \
+    (which w3af_console && echo "✅ w3af" || echo "❌ w3af") && \
+    (which skipfish && echo "✅ skipfish" || echo "❌ skipfish") && \
+    (which ratproxy && echo "✅ ratproxy" || echo "❌ ratproxy") && \
+    echo "Compliance tools:" && \
+    (test -f /opt/govready-q/manage.py && echo "✅ govready-q" || echo "❌ govready-q") && \
+    echo "=== End Summary ==="
+
+# Copy application files
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /tmp/scan_results /tmp/wordlists /app/logs
+
+# Create fly.io compatible startup script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+echo "🚀 Starting ExternalAttacker-MCP on Fly.io..."\n\
+\n\
+# Use PORT environment variable from fly.io\n\
+PORT=${PORT:-6991}\n\
+export PORT\n\
+\n\
+echo "Starting Flask app on port $PORT..."\n\
+echo "Health check endpoint: http://localhost:$PORT/"\n\
+echo "MCP endpoints available: /mcp/tools and /mcp/call"\n\
+\n\
+# Update environment variables in the app if needed\n\
+export FLASK_ENV=${FLASK_ENV:-production}\n\
+export PYTHONUNBUFFERED=1\n\
+\n\
+# Start both Flask app and MCP server using startup script\n\
+exec python3 startup.py\n\
+' > /app/start-container.sh && chmod +x /app/start-container.sh
+
+# Expose port (fly.io will override this)
+EXPOSE 6991
+
+# Health check compatible with fly.io
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-6991}/ || exit 1
+
+# Start the application
+CMD ["/app/start-container.sh"] 

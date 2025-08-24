@@ -1,0 +1,52 @@
+app = "external-attacker-mcp-licensed"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.complete"
+
+[env]
+  PORT = "8080"
+  FLASK_ENV = "production"
+  PYTHONUNBUFFERED = "1"
+  FLASK_APP_URL = "http://127.0.0.1:6991"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  # Health check using license endpoint
+  [[http_service.checks]]
+    method = "get"
+    path = "/license/status"
+    interval = 15000
+    timeout = 10000
+    grace_period = "5s"
+    headers = {}
+
+# Persistent volume for license storage
+[mounts]
+  source = "license_data"
+  destination = "/app/license_data"
+
+# VM configuration optimized for security tools
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory_mb = 4096
+  
+# Auto-scaling based on usage
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+# Console configuration for license management
+[console]
+  command = "/bin/bash"
+
+# Process configuration
+[processes]
+  app = "python3 cloud_startup.py" 

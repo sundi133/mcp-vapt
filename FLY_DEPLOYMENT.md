@@ -1,404 +1,284 @@
-# Deploy ExternalAttacker-MCP to Fly.io
+# 🚀 ExternalAttacker-MCP Fly.io Deployment Guide
 
-Complete guide to deploy your security testing platform to the cloud.
+This guide provides complete instructions for deploying ExternalAttacker-MCP to Fly.io with all security tool dependencies.
 
-## 🚀 **Prerequisites**
+## 📋 Prerequisites
 
-### 1. Install Fly CLI
+1. **Fly.io Account**: Sign up at [fly.io](https://fly.io)
+2. **Fly CLI**: Install flyctl
+   ```bash
+   curl -L https://fly.io/install.sh | sh
+   ```
+3. **Authentication**: Log in to Fly.io
+   ```bash
+   flyctl auth login
+   ```
+
+## 🐳 Dockerfile Options
+
+We provide three deployment options with different security tool sets:
+
+### 1. Complete Build (`Dockerfile.complete`) - **Recommended for Full Features**
+- **All 20+ security tools** including:
+  - ProjectDiscovery suite (subfinder, httpx, naabu, nuclei, katana, dnsx, etc.)
+  - Traditional tools (nmap, nikto, hydra, john, sqlmap, wfuzz)
+  - Advanced tools (w3af, skipfish, ratproxy, metasploit installer)
+- **Size**: ~2-3GB
+- **Build time**: 15-20 minutes
+- **Memory**: 4GB recommended
+
+### 2. Standard Build (`Dockerfile`) - **Balanced Option**
+- **Core security tools** (15+ tools)
+- Includes ProjectDiscovery suite + essential tools
+- **Size**: ~1-2GB  
+- **Build time**: 10-15 minutes
+- **Memory**: 2GB minimum
+
+### 3. Light Build (`Dockerfile.light`) - **Fast & Minimal**
+- **Essential tools only** (8 core tools)
+- Fastest build and smallest size
+- **Size**: ~500MB-1GB
+- **Build time**: 5-10 minutes
+- **Memory**: 2GB minimum
+
+## 📦 Complete Dependency List
+
+### Core Go-Based Tools (ProjectDiscovery Suite)
+```
+✅ subfinder    - Subdomain discovery
+✅ httpx        - HTTP toolkit  
+✅ naabu        - Port scanner
+✅ nuclei       - Vulnerability scanner
+✅ katana       - Web crawler
+✅ dnsx         - DNS toolkit
+✅ cdncheck     - CDN detection
+✅ tlsx         - TLS data scanner
+✅ dalfox       - XSS scanner
+✅ ffuf         - Web fuzzer
+✅ gobuster     - Directory/DNS bruter
+✅ kiterunner   - API endpoint scanner
+```
+
+### System Security Tools
+```
+✅ sqlmap       - SQL injection tool
+✅ nmap         - Network mapper
+✅ nikto        - Web server scanner
+✅ hydra        - Login brute-forcer
+✅ john         - Password cracker
+✅ wfuzz        - Web fuzzer
+✅ trufflehog   - Secret scanner
+✅ commix       - Command injection tool
+```
+
+### Advanced Tools (Complete Build Only)
+```
+✅ w3af         - Web application attack framework
+✅ skipfish     - Web application security scanner
+✅ ratproxy     - Web security audit tool
+✅ metasploit   - Exploitation framework (installer)
+✅ beef         - Browser exploitation framework
+```
+
+## 🚀 Quick Deployment
+
+### Option 1: Automated Script (Recommended)
 ```bash
-# macOS
-curl -L https://fly.io/install.sh | sh
-
-# Linux
-curl -L https://fly.io/install.sh | sh
-
-# Windows (PowerShell)
-iwr https://fly.io/install.ps1 -useb | iex
+chmod +x deploy-to-fly.sh
+./deploy-to-fly.sh
 ```
 
-### 2. Create Fly.io Account
-```bash
-# Sign up and authenticate
-fly auth signup
-# OR login if you have an account
-fly auth login
-```
+The script will:
+1. Check prerequisites
+2. Let you choose build option
+3. Configure fly.toml automatically
+4. Create the app and deploy
+5. Set up persistent storage
 
-## 📦 **Deployment Steps**
+### Option 2: Manual Deployment
 
-### Step 1: Prepare Your Application
-```bash
-# Navigate to your project
-cd /Users/jyotirmoysundi/git/ExternalAttacker-MCP
+1. **Choose your Dockerfile**:
+   ```bash
+   # For complete build
+   cp Dockerfile.complete Dockerfile.deploy
+   
+   # For standard build  
+   cp Dockerfile Dockerfile.deploy
+   
+   # For light build
+   cp Dockerfile.light Dockerfile.deploy
+   ```
 
-# Verify all files are present
-ls -la
-# Should see: Dockerfile, fly.toml, ExternalAttacker-App.py, ExternalAttacker-MCP.py
-```
+2. **Update fly.toml**:
+   ```toml
+   app = 'your-app-name'
+   primary_region = 'sjc'
 
-### Step 2: Launch Application on Fly.io
-```bash
-# Launch your app (this will create it on Fly.io)
-fly launch
+   [build]
+     dockerfile = 'Dockerfile.deploy'
 
-# Follow the prompts:
-# - App name: external-attacker-mcp (or your preferred name)
-# - Region: Choose closest to you (sjc for San Jose, ord for Chicago, etc.)
-# - Database: No (we don't need one for this app)
-# - Redis: No
-```
+   [env]
+     FLASK_ENV = 'production'
+     PYTHONUNBUFFERED = '1'
 
-### Step 3: Create Volume for Scan Results (Optional)
-```bash
-# Create persistent volume for scan results
-fly volumes create scan_results --size 10 --region sjc
+   [http_service]
+     internal_port = 6991
+     force_https = true
 
-# Update fly.toml if needed (already configured)
-```
+   [[vm]]
+     cpu_kind = 'shared'
+     cpus = 2
+     memory_mb = 4096
+   ```
 
-### Step 4: Set Environment Variables/Secrets
-```bash
-# Set API key for Flask app protection
-fly secrets set API_KEY="your_secure_api_key_here"
+3. **Deploy**:
+   ```bash
+   flyctl apps create your-app-name
+   flyctl deploy
+   ```
 
-# Set Flask secret key
-fly secrets set FLASK_SECRET_KEY="your_flask_secret_key_here"
-
-# Optional: Set Nessus credentials if you have them
-fly secrets set NESSUS_ACCESS_KEY="your_nessus_access_key"
-fly secrets set NESSUS_SECRET_KEY="your_nessus_secret_key"
-fly secrets set NESSUS_URL="https://your-nessus-server:8834"
-
-# Optional: Set BeEF credentials
-fly secrets set BEEF_USER="beef_admin"
-fly secrets set BEEF_PASS="secure_password"
-```
-
-### Step 5: Deploy Application
-```bash
-# Deploy your application
-fly deploy
-
-# Monitor deployment
-fly logs
-
-# Check status
-fly status
-```
-
-### Step 6: Scale Resources (If Needed)
-```bash
-# Scale to higher memory if needed for large scans
-fly scale memory 4096
-
-# Scale CPU cores
-fly scale count 2
-
-# Check current scaling
-fly scale show
-```
-
-## 🌐 **Access Your Application**
-
-### Web Interface
-```bash
-# Get your app URL
-fly info
-
-# Example: https://external-attacker-mcp.fly.dev
-```
-
-### API Endpoint
-```bash
-# Test API endpoint
-curl -X POST https://external-attacker-mcp.fly.dev/api/run \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your_api_key" \
-  -d '{"tool": "subfinder", "args": "-domain example.com -silent"}'
-```
-
-### MCP Server Connection
-```bash
-# Your MCP server will be available at:
-# https://external-attacker-mcp.fly.dev
-
-# Use this URL in your MCP client configuration
-```
-
-## 🔧 **Configuration Options**
-
-### Update fly.toml
-```toml
-# Modify resources in fly.toml
-[vm]
-  cpu_kind = "shared"    # or "performance" for more power
-  cpus = 2               # 1, 2, 4, 8
-  memory_mb = 2048       # 512, 1024, 2048, 4096, 8192
-
-# Auto-scaling
-[http_service]
-  auto_stop_machines = true     # Stop when idle
-  auto_start_machines = true    # Start when needed
-  min_machines_running = 0      # Always-on instances
-```
+## 🔧 Configuration Details
 
 ### Environment Variables
+- `PORT`: Automatically set by Fly.io (defaults to 6991)
+- `FLASK_ENV`: Set to 'production'
+- `PYTHONUNBUFFERED`: Set to '1' for proper logging
+
+### Resource Requirements
+
+| Build Type | CPU | Memory | Disk | Build Time |
+|------------|-----|--------|------|------------|
+| Complete   | 2   | 4GB    | 20GB | 15-20 min |
+| Standard   | 2   | 2GB    | 15GB | 10-15 min |
+| Light      | 1   | 2GB    | 10GB | 5-10 min  |
+
+### Persistent Storage
+- Volume: `scan_data` (10GB)
+- Mount: `/app/scan_results`
+- Purpose: Store scan results and temporary files
+
+## 🌐 Access Your Deployment
+
+After successful deployment, your app will be available at:
+- **Web Interface**: `https://your-app-name.fly.dev/`
+- **MCP Tools Endpoint**: `https://your-app-name.fly.dev/mcp/tools`
+- **MCP Call Endpoint**: `https://your-app-name.fly.dev/mcp/call`
+
+## 🔍 Health Checks & Monitoring
+
+### Built-in Health Check
+- Endpoint: `/`
+- Interval: 30s
+- Timeout: 10s
+- Grace period: 15s
+
+### Monitoring Commands
 ```bash
-# List current secrets
-fly secrets list
+# View logs
+flyctl logs -a your-app-name
 
-# Update a secret
-fly secrets set API_KEY="new_secure_key"
+# Check status
+flyctl status -a your-app-name
 
-# Remove a secret
-fly secrets unset OLD_SECRET
+# Scale resources
+flyctl scale memory 4096 -a your-app-name
+flyctl scale count 2 -a your-app-name
+
+# Open dashboard
+flyctl dashboard your-app-name
 ```
 
-## 🛡️ **Security Configuration**
-
-### 1. API Key Protection
-```bash
-# Set strong API key
-fly secrets set API_KEY="$(openssl rand -base64 32)"
-
-# Use in API calls
-curl -H "X-API-Key: your_api_key" https://your-app.fly.dev/api/run
-```
-
-### 2. Network Security
-```bash
-# Fly.io provides HTTPS by default
-# Your app is accessible at: https://your-app-name.fly.dev
-
-# Custom domain (optional)
-fly certs add your-domain.com
-```
-
-### 3. Firewall Rules
-Fly.io handles this automatically, but you can configure:
-```bash
-# View current app info
-fly info
-
-# Check networking
-fly ips list
-```
-
-## 📊 **Monitoring & Logs**
-
-### View Logs
-```bash
-# Real-time logs
-fly logs
-
-# Historical logs
-fly logs --search "error"
-
-# Specific time range
-fly logs --since 1h
-```
-
-### Monitor Performance
-```bash
-# Resource usage
-fly metrics
-
-# Machine status
-fly status
-
-# App info
-fly info
-```
-
-### Health Checks
-The Dockerfile includes health checks. Monitor with:
-```bash
-# Check health status
-fly checks list
-```
-
-## 🔄 **Updates & Maintenance**
-
-### Deploy Updates
-```bash
-# After making code changes
-git add .
-git commit -m "Update security tools"
-
-# Deploy changes
-fly deploy
-
-# Quick deployment (skip build cache)
-fly deploy --no-cache
-```
-
-### Restart Application
-```bash
-# Restart all instances
-fly restart
-
-# Restart specific machine
-fly restart MACHINE_ID
-```
-
-### Scale Down/Up
-```bash
-# Scale down when not in use
-fly scale count 0
-
-# Scale up for heavy testing
-fly scale count 2 memory 4096
-```
-
-## 💰 **Cost Management**
-
-### Fly.io Pricing (as of 2024)
-- **Free Tier**: 3 shared-cpu-1x machines with 256MB RAM
-- **Paid**: ~$0.02/hour for shared-cpu-1x (1GB RAM)
-- **Storage**: ~$0.15/GB/month for volumes
-
-### Cost Optimization
-```bash
-# Auto-stop when idle (already configured)
-auto_stop_machines = true
-
-# Minimum running instances
-min_machines_running = 0
-
-# Monitor usage
-fly billing show
-```
-
-## 🚨 **Security Considerations**
-
-### ⚠️ **Important Security Notes**
-
-1. **API Key Protection**: Always use strong API keys
-2. **Rate Limiting**: Built into the Flask app
-3. **Target Authorization**: Only scan authorized targets
-4. **Log Management**: Monitor scan activities
-5. **Network Access**: App can reach any internet host
-
-### 🔒 **Best Practices**
-
-```bash
-# 1. Use environment variables for all secrets
-fly secrets set SECRET_NAME="value"
-
-# 2. Monitor logs for suspicious activity
-fly logs --search "failed"
-
-# 3. Regular security updates
-fly deploy  # Deploy latest security patches
-
-# 4. Backup important scan results
-fly ssh console -C "tar -czf /tmp/backup.tar.gz /app/results"
-```
-
-## 🛠️ **Troubleshooting**
+## 🛠️ Troubleshooting
 
 ### Common Issues
 
-**1. Build Failures**
+1. **Build Timeout**
+   ```bash
+   # Increase build timeout
+   flyctl deploy --build-timeout 1800
+   ```
+
+2. **Out of Memory During Build**
+   ```bash
+   # Use light build or increase machine size
+   flyctl scale memory 8192 -a your-app-name
+   ```
+
+3. **Tool Not Found**
+   - Check which Dockerfile you're using
+   - Some tools are only in the complete build
+   - Verify tool installation in build logs
+
+4. **Port Issues**
+   - Fly.io automatically sets PORT environment variable
+   - App listens on 0.0.0.0:$PORT (not 127.0.0.1)
+   - Internal port should be 6991 in fly.toml
+
+### Build Logs
 ```bash
-# Check build logs
-fly logs --app external-attacker-mcp
+# View build progress
+flyctl logs -a your-app-name
 
-# Force rebuild
-fly deploy --no-cache
+# Follow logs in real-time
+flyctl logs -a your-app-name -f
 ```
 
-**2. Memory Issues**
+## 🔐 Security Considerations
+
+1. **Tool Access**: All security tools run in isolated container
+2. **Network**: Only HTTP/HTTPS traffic allowed through Fly.io
+3. **Storage**: Scan results stored in persistent volume
+4. **Updates**: Redeploy to update tools and dependencies
+
+## 📊 Cost Optimization
+
+### Recommended Settings
+- **Development**: Light build, 1 CPU, 2GB RAM
+- **Production**: Complete build, 2 CPU, 4GB RAM
+- **High-load**: Scale horizontally with multiple instances
+
+### Auto-scaling
+```toml
+[http_service]
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+```
+
+## 🔄 Updates & Maintenance
+
+### Update Deployment
 ```bash
-# Increase memory
-fly scale memory 4096
+# Pull latest changes
+git pull
 
-# Check current usage
-fly metrics
+# Redeploy
+flyctl deploy -a your-app-name
 ```
 
-**3. Tool Installation Issues**
+### Update Security Tools
+Security tools are updated during each deployment build.
+
+### Database/Volume Backup
 ```bash
-# SSH into container to debug
-fly ssh console
-
-# Check tool availability
-which nuclei subfinder httpx
+# Create volume snapshot
+flyctl volumes snapshots create vol_xyz -a your-app-name
 ```
 
-**4. Network Connectivity**
-```bash
-# Test from container
-fly ssh console -C "curl -I https://example.com"
+## 📞 Support
 
-# Check DNS resolution
-fly ssh console -C "nslookup google.com"
-```
-
-### Debug Commands
-```bash
-# SSH into running container
-fly ssh console
-
-# Execute specific commands
-fly ssh console -C "nuclei -version"
-
-# View filesystem
-fly ssh console -C "ls -la /app"
-
-# Check running processes
-fly ssh console -C "ps aux"
-```
-
-## 🎯 **Usage Examples**
-
-### Test Your Deployed App
-```bash
-# 1. Basic health check
-curl https://external-attacker-mcp.fly.dev/
-
-# 2. API test
-curl -X POST https://external-attacker-mcp.fly.dev/api/run \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your_api_key" \
-  -d '{"tool": "httpx", "args": "-target example.com -silent"}'
-
-# 3. MCP integration
-# Use https://external-attacker-mcp.fly.dev as your MCP server URL
-```
-
-### Sample MCP Client Configuration
-```json
-{
-  "mcpServers": {
-    "external-attacker": {
-      "command": "node",
-      "args": ["path/to/mcp-client.js"],
-      "env": {
-        "MCP_SERVER_URL": "https://external-attacker-mcp.fly.dev"
-      }
-    }
-  }
-}
-```
-
-## 🎉 **Success!**
-
-Your ExternalAttacker-MCP is now running on Fly.io! You have:
-
-✅ **Cloud-hosted security testing platform**  
-✅ **HTTPS-secured endpoints**  
-✅ **Auto-scaling capabilities**  
-✅ **Persistent storage for results**  
-✅ **Professional-grade tools** (nuclei, sqlmap, etc.)  
-✅ **API and MCP server access**  
-
-Access your platform at: `https://your-app-name.fly.dev`
+- **Issues**: Check the GitHub repository
+- **Fly.io Docs**: [fly.io/docs](https://fly.io/docs)
+- **Community**: Fly.io community forum
 
 ---
 
-## 📞 **Support**
+## Quick Start Summary
 
-- **Fly.io Documentation**: https://fly.io/docs/
-- **Fly.io Community**: https://community.fly.io/
-- **Status Page**: https://status.fly.io/ 
+1. Install flyctl and authenticate
+2. Run `./deploy-to-fly.sh`
+3. Choose build option (Complete recommended)
+4. Wait 15-20 minutes for deployment
+5. Access at `https://your-app-name.fly.dev`
+
+Your complete security testing platform is now live on Fly.io! 🎉 

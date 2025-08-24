@@ -1,12 +1,11 @@
-# fly.toml app configuration file generated for my-security-platform on 2025-08-18T14:19:42-07:00
-#
+# fly.toml app configuration file for ExternalAttacker-MCP
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
 
-app = 'my-security-platform'
+app = 'externalattacker-complete'
 primary_region = 'sjc'
 
 [build]
+  dockerfile = 'Dockerfile.complete'
 
 [env]
   FLASK_ENV = 'production'
@@ -15,18 +14,27 @@ primary_region = 'sjc'
 [http_service]
   internal_port = 6991
   force_https = true
-  auto_stop_machines = 'off'
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [[http_service.checks]]
     interval = '30s'
-    timeout = '5s'
-    grace_period = '10s'
+    timeout = '10s'
+    grace_period = '15s'
     method = 'GET'
     path = '/'
 
 [[vm]]
   cpu_kind = 'shared'
   cpus = 2
-  memory_mb = 2048
+  memory_mb = 4096
+
+# Increase disk space for security tools and scan results
+[mounts]
+  source = "scan_data"
+  destination = "/app/scan_results"
+  
+[[statics]]
+  guest_path = "/app/static"
+  url_prefix = "/static/"
